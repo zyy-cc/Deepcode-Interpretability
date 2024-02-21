@@ -98,6 +98,22 @@ def validation(model, device, X_validation, forward_noise_validation, feedback_n
 
     codewords, output = model(X_validation, forward_noise_validation, feedback_noise_validation)
 
+    # print('----------power--------')
+    # print('codewords with mean:  ', torch.mean(codewords).cpu().detach().numpy())
+    # print('codewords with power: ', torch.var(codewords).cpu().detach().numpy())
+
+    # codewords_stat = codewords[:,:,0].cpu().detach().numpy()
+    # print('first codewords with mean:  ', np.mean(codewords_stat))
+    # print('first codewords with power: ', np.var(codewords_stat))
+
+    # codewords_stat = codewords[:,:,1].cpu().detach().numpy()
+    # print('second codewords with mean:  ', np.mean(codewords_stat))
+    # print('second codewords with power: ', np.var(codewords_stat))
+
+    # codewords_stat = codewords[:,:,2].cpu().detach().numpy()
+    # print('third codewords with mean:  ', np.mean(codewords_stat))
+    # print('third codewords with power: ', np.var(codewords_stat))
+
     decoder_output = torch.clamp(output, 0.0, 1.0)
 
     X_validation = X_validation[:,:-1,:]
