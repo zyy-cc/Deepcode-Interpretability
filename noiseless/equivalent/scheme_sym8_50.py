@@ -18,7 +18,7 @@ import itertools
 torch.set_default_dtype(torch.float32)
 
 identity = str(np.random.random())[2:8]
-identity = 'symmetry8'
+identity = 'sym8_snr0_50'
 print('[ID]', identity)
 
 def get_args(jupyter_notebook):
@@ -27,7 +27,7 @@ def get_args(jupyter_notebook):
     parser.add_argument('-code_rate', type=int, default=3)
     parser.add_argument('-block_len', type=int, default=50, help='This do not including zero-padding')
     parser.add_argument('-num_samples_train', type=int, default=80000)
-    parser.add_argument('-num_samples_validation', type=int, default=2000000)
+    parser.add_argument('-num_samples_validation', type=int, default=200000)
     
     parser.add_argument('-feedback_SNR', type=int, default=100, help='100 means noiseless feeback')
     parser.add_argument('-forward_SNR', type=int, default=0)
@@ -38,7 +38,7 @@ def get_args(jupyter_notebook):
 
     parser.add_argument('-with_cuda', type=bool, default=False)
 
-    parser.add_argument('-learning_rate', type=float, default=0.01)
+    parser.add_argument('-learning_rate', type=float, default=0.02)
 
 
     parser.add_argument('-initial_weights', type=str, default='default')
@@ -96,6 +96,22 @@ def validation(model, device, X_validation, forward_noise_validation, feedback_n
     model.eval()
 
     codewords, output = model(X_validation, forward_noise_validation, feedback_noise_validation)
+
+    print('----------result--------')
+    print('codewords with mean:  ', torch.mean(codewords).cpu().detach().numpy())
+    print('codewords with power: ', torch.var(codewords).cpu().detach().numpy())
+
+    codewords_stat = codewords[:,:,0].cpu().detach().numpy()
+    print('first codewords with mean:  ', np.mean(codewords_stat))
+    print('first codewords with power: ', np.var(codewords_stat))
+
+    codewords_stat = codewords[:,:,1].cpu().detach().numpy()
+    print('second codewords with mean:  ', np.mean(codewords_stat))
+    print('second codewords with power: ', np.var(codewords_stat))
+
+    codewords_stat = codewords[:,:,2].cpu().detach().numpy()
+    print('third codewords with mean:  ', np.mean(codewords_stat))
+    print('third codewords with power: ', np.var(codewords_stat))
 
     decoder_output = torch.clamp(output, 0.0, 1.0)
 
@@ -162,7 +178,9 @@ class AE(torch.nn.Module):
         self.d2 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
         self.d3 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
         self.d4 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
-        self.l = torch.nn.Parameter(torch.rand(4), requires_grad = True)
+        self.d5 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
+        self.l = torch.nn.Parameter(torch.rand(5), requires_grad = True)
+
 
         # power_allocation weights
         self.weight_all = torch.nn.Parameter(torch.ones(args.code_rate),requires_grad = True)
@@ -204,7 +222,7 @@ class AE(torch.nn.Module):
             data[:,idx_bit,1] = torch.multiply( data[:,idx_bit,1].clone(), self.weight_first_4[idx_bit])
             data[:,idx_bit,2] = torch.multiply( data[:,idx_bit,2].clone(), self.weight_first_4[idx_bit])
         
-        idx_start = self.args.block_len+1 -1 - 5 + 1
+        idx_start = self.args.block_len+1  - 5 
         for idx_bit in range(5):
             data[:,idx_start+idx_bit,0] = torch.multiply( data[:,idx_start+idx_bit,0].clone(), self.weight_last_5[idx_bit])
             data[:,idx_start+idx_bit,1] = torch.multiply( data[:,idx_start+idx_bit,1].clone(), self.weight_last_5[idx_bit])
@@ -346,9 +364,10 @@ class AE(torch.nn.Module):
             r2 = torch.tanh(self.d2[0] * rec_info_past - self.d2[1] * rec_parity_past - self.d2[2] * rec_parity_current + self.d2[3])
             r3 = torch.tanh(self.d3[0] * rec_info_past - self.d3[1] * rec_parity_past - self.d3[2] * rec_parity_current + self.d3[3])
             r4 = torch.tanh(self.d4[0] * rec_info_past - self.d4[1] * rec_parity_past - self.d4[2] * rec_parity_current + self.d4[3])
+            r5 = torch.tanh(self.d5[0] * rec_info_past - self.d5[1] * rec_parity_past - self.d5[2] * rec_parity_current + self.d5[3])
 
 
-            decoder_output = self.l[0] * r1 + self.l[1] * r2 + self.l[2] * r3 + self.l[3] * r4
+            decoder_output = self.l[0] * r1 + self.l[1] * r2 + self.l[2] * r3 + self.l[3] * r4 + self.l[4] * r5
             decoder_output = decoder_output.view(num_samples_input, 1, 1)
             output = torch.cat((output, decoder_output), dim=1)
 
@@ -396,7 +415,6 @@ print('learning_rate_step_size = ', learning_rate_step_size)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=learning_rate_step_size, gamma=0.1)
 
 
-
 X_validation    = torch.randint(0, 2, (args.num_samples_validation, args.block_len, 1))
 X_validation = torch.cat([X_validation, torch.zeros(args.num_samples_validation, 1, 1)], dim=1)
 forward_noise_validation = forward_sigma * torch.randn((args.num_samples_validation, args.block_len+1, args.code_rate))
@@ -409,8 +427,10 @@ loss_his, ber_his, bler_his, codewords_his, decoder_output_his = validation(mode
 print('----- Validation BER (initial): ', ber_his)
 print('----- Validation loss (initial): ', loss_his)
 
+# for name, parameters in model.named_parameters():
+#     print(name, ":", parameters)
 
-
+#####training
 # writer = SummaryWriter(log_dir = './logs/deepcode/model_'+date.today().strftime("%Y%m%d")+'_'+identity)
 
 # for epoch in range(1, args.num_epoch + 1):
@@ -419,6 +439,8 @@ print('----- Validation loss (initial): ', loss_his)
 #     writer.add_scalar('loss_train', loss_train, epoch)
 
 #     if epoch%10 == 0:
+#         X_validation, forward_noise_validation, feedback_noise_validation = X_validation.to(device), forward_noise_validation.to(device), feedback_noise_validation.to(device)
+
 #         loss_validation, ber_validation, bler_validation, codewords_validation, decoder_output_validation = validation(model, device, X_validation, forward_noise_validation, feedback_noise_validation)
 #         writer.add_scalar('loss_validation', loss_validation, epoch)
 #         print('----- Validation BER: ', ber_validation)
@@ -427,11 +449,11 @@ print('----- Validation loss (initial): ', loss_his)
 
 #         # if ber_validation < ber_his:
 #         ber_his = ber_validation
-#         file_name = './weight/model_'+date.today().strftime("%Y%m%d")+'_'+identity+'.pt'
+#         file_name = './logs/deepcode/model_'+date.today().strftime("%Y%m%d")+'_'+identity+'.pt'
 #         torch.save(model.state_dict(), file_name)
 #         print('saved model as file: ', file_name)
 
-#         file_name = './weight/model_'+date.today().strftime("%Y%m%d")+'_'+identity+'_args.json'
+#         file_name = './logs/deepcode/model_'+date.today().strftime("%Y%m%d")+'_'+identity+'_args.json'
 #         json_object = dumps(args.__dict__)
 #         with open(file_name, "w") as open_file:
 #             open_file.write(json_object)

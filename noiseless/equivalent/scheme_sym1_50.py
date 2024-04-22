@@ -18,7 +18,7 @@ import itertools
 torch.set_default_dtype(torch.float32)
 
 identity = str(np.random.random())[2:8]
-identity = 'symmetry1'
+identity = 'sym1_snr0_50'
 print('[ID]', identity)
 
 def get_args(jupyter_notebook):
@@ -27,7 +27,7 @@ def get_args(jupyter_notebook):
     parser.add_argument('-code_rate', type=int, default=3)
     parser.add_argument('-block_len', type=int, default=50, help='This do not including zero-padding')
     parser.add_argument('-num_samples_train', type=int, default=80000)
-    parser.add_argument('-num_samples_validation', type=int, default=2000000)
+    parser.add_argument('-num_samples_validation', type=int, default=200000)
     
     parser.add_argument('-feedback_SNR', type=int, default=100, help='100 means noiseless feeback')
     parser.add_argument('-forward_SNR', type=int, default=0)
@@ -59,14 +59,8 @@ def errors_ber(y_true, y_pred, device, positions = 'default'):
     y_pred = y_pred.to(device)
     y_true = y_true.view(y_true.shape[0], -1, 1)    # the size -1 is inferred from other dimensions
     y_pred = y_pred.view(y_pred.shape[0], -1, 1)
-    t1 = torch.round(y_true[:,:,:])
-    t2 = torch.round(y_pred[:,:,:])
 
-    # myOtherTensor = np.not_equal(t1, t2).float()
-    # k = sum(sum(myOtherTensor))/(myOtherTensor.shape[0]*myOtherTensor.shape[1])
-    # return k
-
-    comparisin_result = torch.ne(t1, t2).float()  # how many different bits
+    comparisin_result = torch.ne(torch.round(y_true), torch.round(y_pred)).float()  # how many different bits
     if positions == 'default':
         res = torch.sum(comparisin_result)/(comparisin_result.shape[0]*comparisin_result.shape[1])  # new
     else:   
@@ -75,6 +69,13 @@ def errors_ber(y_true, y_pred, device, positions = 'default'):
             res[pos] = 0.0
         res = torch.mean(res)
     return res
+
+    # t1 = torch.round(y_true[:,:,:])
+    # t2 = torch.round(y_pred[:,:,:])
+    # myOtherTensor = np.not_equal(t1, t2).float()
+    # k = sum(sum(myOtherTensor))/(myOtherTensor.shape[0]*myOtherTensor.shape[1])
+    # return k
+
 
 def errors_bler(y_true, y_pred, device, positions = 'default'):
     y_true = y_true.to(device)
@@ -95,6 +96,21 @@ def validation(model, device, X_validation, forward_noise_validation, feedback_n
     model.eval()
 
     codewords, output = model(X_validation, forward_noise_validation, feedback_noise_validation)
+    print('----------result--------')
+    print('codewords with mean:  ', torch.mean(codewords).cpu().detach().numpy())
+    print('codewords with power: ', torch.var(codewords).cpu().detach().numpy())
+
+    codewords_stat = codewords[:,:,0].cpu().detach().numpy()
+    print('first codewords with mean:  ', np.mean(codewords_stat))
+    print('first codewords with power: ', np.var(codewords_stat))
+
+    codewords_stat = codewords[:,:,1].cpu().detach().numpy()
+    print('second codewords with mean:  ', np.mean(codewords_stat))
+    print('second codewords with power: ', np.var(codewords_stat))
+
+    codewords_stat = codewords[:,:,2].cpu().detach().numpy()
+    print('third codewords with mean:  ', np.mean(codewords_stat))
+    print('third codewords with power: ', np.var(codewords_stat))
 
     decoder_output = torch.clamp(output, 0.0, 1.0)
 
@@ -155,15 +171,16 @@ class AE(torch.nn.Module):
         self.args             = args
 
         # Encoder
-        self.e = torch.nn.Parameter(torch.rand(2), requires_grad = True)
-        self.k = torch.nn.Parameter(torch.rand(4), requires_grad = True)
+        self.e = torch.nn.Parameter(torch.rand(2), requires_grad = False)
+        self.k = torch.nn.Parameter(torch.rand(4), requires_grad = False)
         
         # Decoder
         self.d1 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
         self.d2 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
         self.d3 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
         self.d4 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
-        self.l = torch.nn.Parameter(torch.rand(4), requires_grad = True)
+        self.d5 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
+        self.l = torch.nn.Parameter(torch.rand(5), requires_grad = True)
 
         # power_allocation weights
         self.weight_all = torch.nn.Parameter(torch.ones(args.code_rate),requires_grad = True)
@@ -174,24 +191,13 @@ class AE(torch.nn.Module):
         if self.args.batch_norm == True:
             batch_mean = torch.mean(data, 0)
             batch_std = torch.std(data,0)
-
-            ##### To ensure that the data always satisfies the power constraint, we do not use the precalculated mean and variance.###### 
-            ## store the mean and variance.
-            # id = str(self.args.feedback_SNR)+'_'+str(self.args.forward_SNR)+'_'+str(self.args.enc_num_unit)
-            # with open('meanvar_py/meanvar_'+id+'.pkl', 'wb') as file:  # Python 3: open(..., 'wb')
-            #     pickle.dump({'mean': batch_mean, 'var': batch_std}, file)
-            # if False:
-            #     print('normalize with means = ', batch_mean)
-            #     print('normalize with stds = ', batch_std)
+            data_normalized = (data - batch_mean)*1.0/batch_std
+            if False:
+                print('normalize with means = ', batch_mean)
+                print('normalize with stds = ', batch_std)
         else:
-            # get a precalculated norm
-            id = str(self.args.feedback_SNR)+'_'+str(self.args.forward_SNR)+'_'+str(self.args.enc_num_unit)
-            with open('meanvar_py/meanvar_'+id+'.pkl', 'rb') as file:  # Python 3: open(..., 'wb')
-                loaded_data = pickle.load(file)
-                batch_mean, batch_std = loaded_data['mean'], loaded_data['var']
-
-        data_normalized = (data - batch_mean)*1.0/batch_std
-
+            data_normalized = data # todo - get a precalculated norm
+        
         return data_normalized
     
     def power_allocation(self, data):
@@ -205,7 +211,7 @@ class AE(torch.nn.Module):
             data[:,idx_bit,1] = torch.multiply( data[:,idx_bit,1].clone(), self.weight_first_4[idx_bit])
             data[:,idx_bit,2] = torch.multiply( data[:,idx_bit,2].clone(), self.weight_first_4[idx_bit])
         
-        idx_start = self.args.block_len+1 -1 - 5 + 1
+        idx_start = self.args.block_len+1 - 5 
         for idx_bit in range(5):
             data[:,idx_start+idx_bit,0] = torch.multiply( data[:,idx_start+idx_bit,0].clone(), self.weight_last_5[idx_bit])
             data[:,idx_start+idx_bit,1] = torch.multiply( data[:,idx_start+idx_bit,1].clone(), self.weight_last_5[idx_bit])
@@ -324,7 +330,7 @@ class AE(torch.nn.Module):
         
         cat_codewords = torch.cat([codewords_phase_1, norm_output], axis=2)
 
-        # power allocation 
+        ####power allocation part#####
         power_allocation_output = self.power_allocation(cat_codewords)
         codewords = power_allocation_output
 
@@ -334,7 +340,6 @@ class AE(torch.nn.Module):
         # decoder
         output = torch.empty(num_samples_input, 0, 1)
         output = output.to(device)
-        # using the future parity bits to decode the current bit.
         for i in range(information_bits.shape[1]-1):
             rec_info_past = noisy_codewords[:,i,0]
             rec_parity1_past = noisy_codewords[:,i,1]
@@ -349,9 +354,9 @@ class AE(torch.nn.Module):
             r2 = torch.tanh(self.d2[0] * rec_info_past - self.d2[1] * rec_parity_past - self.d2[2] * rec_parity_current + self.d2[3])
             r3 = torch.tanh(self.d3[0] * rec_info_past - self.d3[1] * rec_parity_past - self.d3[2] * rec_parity_current + self.d3[3])
             r4 = torch.tanh(self.d4[0] * rec_info_past - self.d4[1] * rec_parity_past - self.d4[2] * rec_parity_current + self.d4[3])
+            r5 = torch.tanh(self.d5[0] * rec_info_past - self.d5[1] * rec_parity_past - self.d5[2] * rec_parity_current + self.d5[3])
 
-
-            decoder_output = self.l[0] * r1 + self.l[1] * r2 + self.l[2] * r3 + self.l[3] * r4
+            decoder_output = self.l[0] * r1 + self.l[1] * r2 + self.l[2] * r3 + self.l[3] * r4 + self.l[4] * r5
             decoder_output = decoder_output.view(num_samples_input, 1, 1)
             output = torch.cat((output, decoder_output), dim=1)
 
@@ -370,7 +375,7 @@ else:
 
 forward_sigma = snr_db_2_sigma(args.forward_SNR)
 
-
+# use_cuda = not args.with_cuda and torch.cuda.is_available() # incorrect
 use_cuda = args.with_cuda and torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
 print('use_cuda = ', use_cuda)
@@ -393,17 +398,21 @@ else:
     model.args = args
     print('initial weights are loaded.')
 
+# model.to(device)
+# model.weight_last_5.parameters(), model.weight_first_4.parameters(), model.weight_all.parameters()
+# itertools.chain(*params)
 optimizer = torch.optim.Adam(model.parameters(),lr=args.learning_rate, betas=(0.9,0.999), eps=1e-07, weight_decay=0, amsgrad=False)
 learning_rate_step_size = int(10**6 / args.batch_size)
 print('learning_rate_step_size = ', learning_rate_step_size)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=learning_rate_step_size, gamma=0.1)
 
+
 X_validation    = torch.randint(0, 2, (args.num_samples_validation, args.block_len, 1))
 X_validation = torch.cat([X_validation, torch.zeros(args.num_samples_validation, 1, 1)], dim=1)
 forward_noise_validation = forward_sigma * torch.randn((args.num_samples_validation, args.block_len+1, args.code_rate))
-
-# noiseless feedback
 feedback_noise_validation = torch.zeros((args.num_samples_validation, args.block_len+1, args.code_rate))   # perfect feedback
+        
+
 # feedback_sigma * torch.randn((args.num_samples_validation, args.block_len+1, args.code_rate))
 
 X_validation, forward_noise_validation, feedback_noise_validation = X_validation.to(device), forward_noise_validation.to(device), feedback_noise_validation.to(device)
@@ -413,8 +422,7 @@ loss_his, ber_his, bler_his, codewords_his, decoder_output_his = validation(mode
 print('----- Validation BER: ', ber_his)
 print('----- Validation loss: ', loss_his)
 
-
-
+#####training
 # writer = SummaryWriter(log_dir = './logs/deepcode/model_'+date.today().strftime("%Y%m%d")+'_'+identity)
 
 # for epoch in range(1, args.num_epoch + 1):

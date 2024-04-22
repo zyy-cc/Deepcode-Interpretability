@@ -21,7 +21,7 @@ import itertools
 torch.set_default_dtype(torch.float32)
 
 identity = str(np.random.random())[2:8]
-identity = 'vary_snr0_fbsnr10_50'
+identity = 'vary_snr0_fbsnr20_50'
 print('[ID]', identity)
 
 def get_args(jupyter_notebook):
@@ -30,9 +30,9 @@ def get_args(jupyter_notebook):
     parser.add_argument('-code_rate', type=int, default=3)
     parser.add_argument('-block_len', type=int, default=50, help='This do not including zero-padding')
     parser.add_argument('-num_samples_train', type=int, default=80000)
-    parser.add_argument('-num_samples_validation', type=int, default=20000)
+    parser.add_argument('-num_samples_validation', type=int, default=200000)
     
-    parser.add_argument('-feedback_SNR', type=int, default=10, help='100 means noiseless feeback')
+    parser.add_argument('-feedback_SNR', type=int, default=20, help='100 means noiseless feeback')
     parser.add_argument('-forward_SNR', type=int, default=0)
 
     parser.add_argument('-batch_size', type=int, default=400)
@@ -99,6 +99,21 @@ def validation(model, device, X_validation, forward_noise_validation, feedback_n
     model.eval()
 
     codewords, output = model(X_validation, forward_noise_validation, feedback_noise_validation)
+    print('----------result--------')
+    print('codewords with mean:  ', torch.mean(codewords).cpu().detach().numpy())
+    print('codewords with power: ', torch.var(codewords).cpu().detach().numpy())
+
+    codewords_stat = codewords[:,:,0].cpu().detach().numpy()
+    print('first codewords with mean:  ', np.mean(codewords_stat))
+    print('first codewords with power: ', np.var(codewords_stat))
+
+    codewords_stat = codewords[:,:,1].cpu().detach().numpy()
+    print('second codewords with mean:  ', np.mean(codewords_stat))
+    print('second codewords with power: ', np.var(codewords_stat))
+
+    codewords_stat = codewords[:,:,2].cpu().detach().numpy()
+    print('third codewords with mean:  ', np.mean(codewords_stat))
+    print('third codewords with power: ', np.var(codewords_stat))
 
     decoder_output = torch.clamp(output, 0.0, 1.0)
 
@@ -165,7 +180,8 @@ class AE(torch.nn.Module):
         self.d2 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
         self.d3 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
         self.d4 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
-        self.l = torch.nn.Parameter(torch.rand(4), requires_grad = True)
+        self.d5 = torch.nn.Parameter(torch.rand(4), requires_grad = True)
+        self.l = torch.nn.Parameter(torch.rand(5), requires_grad = True)
 
         # power_allocation weights
         self.weight_all = torch.nn.Parameter(torch.ones(args.code_rate),requires_grad = True)
@@ -207,7 +223,7 @@ class AE(torch.nn.Module):
             data[:,idx_bit,1] = torch.multiply( data[:,idx_bit,1].clone(), self.weight_first_4[idx_bit])
             data[:,idx_bit,2] = torch.multiply( data[:,idx_bit,2].clone(), self.weight_first_4[idx_bit])
         
-        idx_start = self.args.block_len+1 -1 - 5 + 1
+        idx_start = self.args.block_len+1 - 5 
         for idx_bit in range(5):
             data[:,idx_start+idx_bit,0] = torch.multiply( data[:,idx_start+idx_bit,0].clone(), self.weight_last_5[idx_bit])
             data[:,idx_start+idx_bit,1] = torch.multiply( data[:,idx_start+idx_bit,1].clone(), self.weight_last_5[idx_bit])
@@ -350,9 +366,10 @@ class AE(torch.nn.Module):
             r2 = torch.tanh(self.d2[0] * rec_info_past - self.d2[1] * rec_parity_past - self.d2[2] * rec_parity_current + self.d2[3])
             r3 = torch.tanh(self.d3[0] * rec_info_past - self.d3[1] * rec_parity_past - self.d3[2] * rec_parity_current + self.d3[3])
             r4 = torch.tanh(self.d4[0] * rec_info_past - self.d4[1] * rec_parity_past - self.d4[2] * rec_parity_current + self.d4[3])
+            r5 = torch.tanh(self.d5[0] * rec_info_past - self.d5[1] * rec_parity_past - self.d5[2] * rec_parity_current + self.d5[3])
 
+            decoder_output = self.l[0] * r1 + self.l[1] * r2 + self.l[2] * r3 + self.l[3] * r4 + self.l[4] * r5
 
-            decoder_output = self.l[0] * r1 + self.l[1] * r2 + self.l[2] * r3 + self.l[3] * r4
             decoder_output = decoder_output.view(num_samples_input, 1, 1)
             output = torch.cat((output, decoder_output), dim=1)
 
@@ -384,7 +401,7 @@ else:
 print(model)
 
 
-args.initial_weights = 'weight/model_interpretable_vary_snr0_fbsnr10_50.pt'
+args.initial_weights = 'weight/model_interpretable_vary_snr0_fbsnr20_50.pt'
 if args.initial_weights == 'default':
     pass
 elif args.initial_weights == 'deepcode':
@@ -412,9 +429,10 @@ X_validation, forward_noise_validation, feedback_noise_validation = X_validation
 loss_his, ber_his, bler_his, codewords_his, decoder_output_his = validation(model, device, X_validation, forward_noise_validation, feedback_noise_validation)
 
 print('----- Validation BER: ', ber_his)
+print('----- Validation BLER: ', bler_his)
 print('----- Validation loss: ', loss_his)
 
-
+####### training 
 # writer = SummaryWriter(log_dir = './logs/deepcode/model_'+date.today().strftime("%Y%m%d")+'_'+identity)
 
 # for epoch in range(1, args.num_epoch + 1):
