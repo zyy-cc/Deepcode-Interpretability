@@ -265,7 +265,8 @@ class AE(torch.nn.Module):
             """
             condition = (b == 0) 
             branch1 = torch.tanh(- self.k[0] * n1 + self.k[1] * n2 - self.k[2] * n3 + self.k[3])
-            branch2 = 1
+            dim1, dim2 = branch1.shape
+            branch2 = torch.ones(dim1, dim2).to(device)
             res = torch.where(condition, branch1, branch2)
             return res
             
@@ -278,7 +279,8 @@ class AE(torch.nn.Module):
             """
             condition = (b == 1) 
             branch1 = torch.tanh(- self.k[0] * n1 + self.k[1] * n2 - self.k[2] * n3 - self.k[3])
-            branch2 = -1
+            dim1, dim2 = branch1.shape
+            branch2 = -1 * torch.ones(dim1, dim2).to(device)
             res = torch.where(condition, branch1, branch2)
             return res
 
@@ -319,11 +321,12 @@ class AE(torch.nn.Module):
                                                    noise_tmp.view(num_samples_input, 1, 3)], dim=2)
                 p1_linear = parity1(input_tmp[:,:,0], input_tmp[:,:,1])
                 p2_linear = parity2(input_tmp[:,:,0], input_tmp[:,:,1])
-                vh4 = 1
-                vh5 = -1
+                vh4 = torch.ones(num_samples_input, 1).to(device)
+                vh5 = -1 * torch.ones(num_samples_input, 1).to(device)
 
-                vh6 = 1
-                vh7 = 1
+                vh6 = torch.ones(num_samples_input, 1).to(device)
+                vh7 = torch.ones(num_samples_input, 1).to(device)
+
                 all_h4.append(vh4)
                 all_h5.append(vh5)
                 all_h6.append(vh6)
